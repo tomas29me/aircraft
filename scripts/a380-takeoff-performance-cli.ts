@@ -97,6 +97,7 @@ interface A380WeightVariant {
 interface PilotInput {
   airportIcao: string;
   runwayIdent: string;
+  runwaySurface: string;
   intersectionName?: string;
   toraM: number;
   todaM: number;
@@ -245,10 +246,11 @@ const TRENT_972B_84_ENGINE = {
   // reduces available takeoff thrust by about 0.65%.
   assumedTempDeratePerDegAboveFlatRating: 0.0065,
 
-  // TODO_TUNE:
-  // Placeholder exponents for how reduced thrust affects field distance and climb limit.
-  thrustToDistanceExponent: 1.35,
-  thrustToClimbExponent: 1.10,
+  // Tuned against public A380 flex-vs-max analysis:
+  // 75% thrust gives roughly 1.31x lift-off distance and 1.35x distance to 1500 ft
+  // versus max thrust in the SRS analysis.
+  thrustToDistanceExponent: 1.05,
+  thrustToClimbExponent: 1.00,
 };
 
 const A380_PERF_PLACEHOLDERS = {
@@ -273,7 +275,13 @@ const A380_PERF_PLACEHOLDERS = {
   packsOnPenaltyM: 120,
   engineAntiIcePenaltyM: 120,
   wingAntiIcePenaltyM: 260,
-
+    // Chart correction placeholders.
+  // The user-provided field-limit chart is ISA only, so non-ISA temperature needs correction.
+  fieldHotIsaPenaltyPerDegC: 0.006,
+  fieldColdIsaCreditPerDegC: 0.002,
+  minFieldTemperatureFactor: 0.92,
+  maxFieldTemperatureFactor: 1.25,
+  
   // Climb limit placeholders.
   seaLevelIsaClimbLimitKg: 575_000,
   pressureAltitudeClimbPenaltyKgPer1000Ft: 7_500,
@@ -282,7 +290,96 @@ const A380_PERF_PLACEHOLDERS = {
   engineAntiIceClimbPenaltyKg: 3_000,
   wingAntiIceClimbPenaltyKg: 6_500,
 };
+// =====================================================================================
+// A380 TAKEOFF FIELD LIMIT CHART - ISA / TRENT 900
+// Source: user-provided Take-Off Weight Limitation chart.
+// Chart gives maximum takeoff weight versus runway length for pressure-altitude curves.
+// Values below are approximate digitised points from the chart.
+// NOT certified Airbus data.
+// =====================================================================================
 
+interface FieldLimitChartPoint {
+  runwayLengthM: number;
+  maxTowKg: number;
+}
+
+interface FieldLimitChartCurve {
+  pressureAltitudeFt: number;
+  points: FieldLimitChartPoint[];
+}
+
+const A380_FIELD_LIMIT_CHART_ISA_TRENT900: FieldLimitChartCurve[] = [
+  {
+    pressureAltitudeFt: 0,
+    points: [
+      { runwayLengthM: 1500, maxTowKg: 385_000 },
+      { runwayLengthM: 1700, maxTowKg: 440_000 },
+      { runwayLengthM: 2000, maxTowKg: 480_000 },
+      { runwayLengthM: 2500, maxTowKg: 530_000 },
+      { runwayLengthM: 3000, maxTowKg: 575_000 },
+      { runwayLengthM: 3500, maxTowKg: 600_000 },
+      { runwayLengthM: 4000, maxTowKg: 615_000 },
+      { runwayLengthM: 4500, maxTowKg: 627_000 },
+      { runwayLengthM: 5200, maxTowKg: 637_000 },
+    ],
+  },
+  {
+    pressureAltitudeFt: 2000,
+    points: [
+      { runwayLengthM: 1500, maxTowKg: 375_000 },
+      { runwayLengthM: 1700, maxTowKg: 420_000 },
+      { runwayLengthM: 2000, maxTowKg: 455_000 },
+      { runwayLengthM: 2500, maxTowKg: 500_000 },
+      { runwayLengthM: 3000, maxTowKg: 555_000 },
+      { runwayLengthM: 3500, maxTowKg: 575_000 },
+      { runwayLengthM: 4000, maxTowKg: 590_000 },
+      { runwayLengthM: 4500, maxTowKg: 602_000 },
+      { runwayLengthM: 5200, maxTowKg: 612_000 },
+    ],
+  },
+  {
+    pressureAltitudeFt: 4000,
+    points: [
+      { runwayLengthM: 1500, maxTowKg: 360_000 },
+      { runwayLengthM: 1700, maxTowKg: 400_000 },
+      { runwayLengthM: 2000, maxTowKg: 435_000 },
+      { runwayLengthM: 2500, maxTowKg: 475_000 },
+      { runwayLengthM: 3000, maxTowKg: 530_000 },
+      { runwayLengthM: 3500, maxTowKg: 548_000 },
+      { runwayLengthM: 4000, maxTowKg: 565_000 },
+      { runwayLengthM: 4500, maxTowKg: 575_000 },
+      { runwayLengthM: 5200, maxTowKg: 588_000 },
+    ],
+  },
+  {
+    pressureAltitudeFt: 6000,
+    points: [
+      { runwayLengthM: 1500, maxTowKg: 345_000 },
+      { runwayLengthM: 1700, maxTowKg: 382_000 },
+      { runwayLengthM: 2000, maxTowKg: 410_000 },
+      { runwayLengthM: 2500, maxTowKg: 455_000 },
+      { runwayLengthM: 3000, maxTowKg: 510_000 },
+      { runwayLengthM: 3500, maxTowKg: 525_000 },
+      { runwayLengthM: 4000, maxTowKg: 540_000 },
+      { runwayLengthM: 4500, maxTowKg: 555_000 },
+      { runwayLengthM: 5200, maxTowKg: 562_000 },
+    ],
+  },
+  {
+    pressureAltitudeFt: 8000,
+    points: [
+      { runwayLengthM: 1500, maxTowKg: 340_000 },
+      { runwayLengthM: 1700, maxTowKg: 370_000 },
+      { runwayLengthM: 2000, maxTowKg: 395_000 },
+      { runwayLengthM: 2500, maxTowKg: 440_000 },
+      { runwayLengthM: 3000, maxTowKg: 485_000 },
+      { runwayLengthM: 3500, maxTowKg: 500_000 },
+      { runwayLengthM: 4000, maxTowKg: 515_000 },
+      { runwayLengthM: 4500, maxTowKg: 525_000 },
+      { runwayLengthM: 5200, maxTowKg: 537_000 },
+    ],
+  },
+];
 // =====================================================================================
 // V-SPEED CHART DATA
 // Source: Uploaded PA/Wilco A380 Merge V Speed Charts.
@@ -554,6 +651,7 @@ function calculateTakeoffPerformance(input: PilotInput): TakeoffResult {
     warnings.push('ASDA / ACCELERATE-STOP INSUFFICIENT');
   }
 
+
   if (wind.headwindKt < -A380_PERF_PLACEHOLDERS.maxTailwindKt) {
     warnings.push(`TAILWIND ABOVE PLACEHOLDER LIMIT ${A380_PERF_PLACEHOLDERS.maxTailwindKt} KT`);
   }
@@ -589,7 +687,9 @@ function calculateTakeoffPerformance(input: PilotInput): TakeoffResult {
     notes.push(`${input.flapConfig} V-speeds included, but field-length corrections are not yet configuration-specific.`);
   }
 
-  notes.push('FLEX is now selected by binary-searching the highest assumed temperature that still passes placeholder field/climb limits.');
+  notes.push('FLEX is selected by binary-searching the highest assumed temperature that still passes field/climb checks.');
+  notes.push('Field limit uses approximate digitised A380 Trent 900 ISA runway-length/pressure-altitude chart data.');
+  notes.push('Reduced-thrust runway effect is calibrated against public A380 75% vs 100% thrust analysis.');
   notes.push('Trent 972B-84 public TADS/TCDS data gives thrust anchors and limits, but not the real assumed-temperature lapse table.');
   notes.push('V-speeds use the uploaded sim V-speed chart.');
   notes.push('Brake-energy, tire-speed and obstacle logic are placeholders.');
@@ -635,15 +735,18 @@ function calculateTakeoffPerformance(input: PilotInput): TakeoffResult {
   };
 }
 
-function estimateRequiredTora(
-  input: PilotInput,
-  densityAltitudeFt: number,
-  headwindKt: number,
-  thrustRatio = 1,
-): number {
-  const weightTerm = (input.towKg - 400_000) * A380_PERF_PLACEHOLDERS.distancePerKgAbove400T;
-  const densityAltitudeTerm = Math.max(0, densityAltitudeFt) * A380_PERF_PLACEHOLDERS.densityAltitudeDistanceFactorPerFt;
+function getFieldTemperatureFactor(isaDeviationC: number): number {
+  const hotPenalty = Math.max(0, isaDeviationC) * A380_PERF_PLACEHOLDERS.fieldHotIsaPenaltyPerDegC;
+  const coldCredit = Math.max(0, -isaDeviationC) * A380_PERF_PLACEHOLDERS.fieldColdIsaCreditPerDegC;
 
+  return clamp(
+    1 + hotPenalty - coldCredit,
+    A380_PERF_PLACEHOLDERS.minFieldTemperatureFactor,
+    A380_PERF_PLACEHOLDERS.maxFieldTemperatureFactor,
+  );
+}
+
+function getRunwayCorrectionM(input: PilotInput, headwindKt: number): number {
   const slopeTerm =
     input.slopePercent >= 0
       ? input.slopePercent * A380_PERF_PLACEHOLDERS.uphillSlopePenaltyMPerPercent
@@ -670,22 +773,151 @@ function estimateRequiredTora(
         ? A380_PERF_PLACEHOLDERS.engineAntiIcePenaltyM
         : A380_PERF_PLACEHOLDERS.wingAntiIcePenaltyM;
 
-    const fullThrustRequiredToraM =
-    A380_PERF_PLACEHOLDERS.baseDryToraMAt400T +
-    weightTerm +
-    densityAltitudeTerm +
-    slopeTerm +
-    windTerm +
-    runwayConditionTerm +
-    packsTerm +
-    antiIceTerm;
+  return slopeTerm + windTerm + runwayConditionTerm + packsTerm + antiIceTerm;
+}
 
-  const thrustDistanceFactor = Math.pow(
+function getThrustDistanceFactor(thrustRatio: number): number {
+  return Math.pow(
     1 / clamp(thrustRatio, 0.70, 1),
     TRENT_972B_84_ENGINE.thrustToDistanceExponent,
   );
+}
 
-  return Math.round(fullThrustRequiredToraM * thrustDistanceFactor);
+function interpolateMaxTowForCurve(points: FieldLimitChartPoint[], runwayLengthM: number): number {
+  const sorted = [...points].sort((a, b) => a.runwayLengthM - b.runwayLengthM);
+
+  if (runwayLengthM <= sorted[0].runwayLengthM) {
+    return sorted[0].maxTowKg;
+  }
+
+  if (runwayLengthM >= sorted[sorted.length - 1].runwayLengthM) {
+    return sorted[sorted.length - 1].maxTowKg;
+  }
+
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const a = sorted[i];
+    const b = sorted[i + 1];
+
+    if (runwayLengthM >= a.runwayLengthM && runwayLengthM <= b.runwayLengthM) {
+      const ratio = (runwayLengthM - a.runwayLengthM) / (b.runwayLengthM - a.runwayLengthM);
+      return a.maxTowKg + ratio * (b.maxTowKg - a.maxTowKg);
+    }
+  }
+
+  return sorted[sorted.length - 1].maxTowKg;
+}
+
+function interpolateRequiredRunwayForCurve(points: FieldLimitChartPoint[], towKg: number): number {
+  const sorted = [...points].sort((a, b) => a.maxTowKg - b.maxTowKg);
+
+  if (towKg <= sorted[0].maxTowKg) {
+    return sorted[0].runwayLengthM;
+  }
+
+  if (towKg >= sorted[sorted.length - 1].maxTowKg) {
+    return sorted[sorted.length - 1].runwayLengthM;
+  }
+
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const a = sorted[i];
+    const b = sorted[i + 1];
+
+    if (towKg >= a.maxTowKg && towKg <= b.maxTowKg) {
+      const ratio = (towKg - a.maxTowKg) / (b.maxTowKg - a.maxTowKg);
+      return a.runwayLengthM + ratio * (b.runwayLengthM - a.runwayLengthM);
+    }
+  }
+
+  return sorted[sorted.length - 1].runwayLengthM;
+}
+
+function interpolateChartByPressureAltitude(
+  pressureAltitudeFt: number,
+  valueForCurve: (curve: FieldLimitChartCurve) => number,
+): number {
+  const curves = [...A380_FIELD_LIMIT_CHART_ISA_TRENT900].sort(
+    (a, b) => a.pressureAltitudeFt - b.pressureAltitudeFt,
+  );
+
+  if (pressureAltitudeFt <= curves[0].pressureAltitudeFt) {
+    return valueForCurve(curves[0]);
+  }
+
+  if (pressureAltitudeFt >= curves[curves.length - 1].pressureAltitudeFt) {
+    return valueForCurve(curves[curves.length - 1]);
+  }
+
+  for (let i = 0; i < curves.length - 1; i++) {
+    const lower = curves[i];
+    const upper = curves[i + 1];
+
+    if (pressureAltitudeFt >= lower.pressureAltitudeFt && pressureAltitudeFt <= upper.pressureAltitudeFt) {
+      const ratio =
+        (pressureAltitudeFt - lower.pressureAltitudeFt) /
+        (upper.pressureAltitudeFt - lower.pressureAltitudeFt);
+
+      const lowerValue = valueForCurve(lower);
+      const upperValue = valueForCurve(upper);
+
+      return lowerValue + ratio * (upperValue - lowerValue);
+    }
+  }
+
+  return valueForCurve(curves[curves.length - 1]);
+}
+
+function getChartFieldLimitWeightKg(input: PilotInput, thrustRatio: number): number {
+  const pressureAltitudeFt = calculatePressureAltitude(input.elevationFt, input.qnhHpa);
+  const isaDeviationC = input.oatC - getIsaTemperatureC(input.elevationFt);
+  const wind = calculateWindComponents(input.windDirectionDeg, input.windSpeedKt, input.runwayHeadingDeg);
+
+  const limitingDeclaredDistanceM = Math.min(input.toraM, input.todaM, input.asdaM);
+  const runwayCorrectionM = getRunwayCorrectionM(input, wind.headwindKt);
+  const temperatureFactor = getFieldTemperatureFactor(isaDeviationC);
+  const thrustDistanceFactor = getThrustDistanceFactor(thrustRatio);
+
+  const equivalentIsaFullThrustRunwayM = Math.max(
+    0,
+    (limitingDeclaredDistanceM - runwayCorrectionM) / temperatureFactor / thrustDistanceFactor,
+  );
+
+  const chartLimitKg = interpolateChartByPressureAltitude(
+    pressureAltitudeFt,
+    (curve) => interpolateMaxTowForCurve(curve.points, equivalentIsaFullThrustRunwayM),
+  );
+
+  return Math.round(Math.min(chartLimitKg, input.weightVariant.mtowKg));
+}
+
+function getChartRequiredToraM(
+  input: PilotInput,
+  pressureAltitudeFt: number,
+  isaDeviationC: number,
+  headwindKt: number,
+  thrustRatio: number,
+): number {
+  const baseIsaFullThrustRequiredM = interpolateChartByPressureAltitude(
+    pressureAltitudeFt,
+    (curve) => interpolateRequiredRunwayForCurve(curve.points, input.towKg),
+  );
+
+  const temperatureFactor = getFieldTemperatureFactor(isaDeviationC);
+  const thrustDistanceFactor = getThrustDistanceFactor(thrustRatio);
+  const runwayCorrectionM = getRunwayCorrectionM(input, headwindKt);
+
+  return Math.round(baseIsaFullThrustRequiredM * temperatureFactor * thrustDistanceFactor + runwayCorrectionM);
+}
+
+function estimateRequiredTora(
+  input: PilotInput,
+  densityAltitudeFt: number,
+  headwindKt: number,
+  thrustRatio = 1,
+): number {
+  const pressureAltitudeFt = calculatePressureAltitude(input.elevationFt, input.qnhHpa);
+  const isaDeviationC = input.oatC - getIsaTemperatureC(input.elevationFt);
+
+  return getChartRequiredToraM(input, pressureAltitudeFt, isaDeviationC, headwindKt, thrustRatio);
 }
 
 function estimateRequiredToda(input: PilotInput, requiredToraM: number): number {
@@ -701,31 +933,7 @@ function estimateRequiredAsda(input: PilotInput, requiredToraM: number): number 
 }
 
 function estimateFieldLimitWeight(input: PilotInput, thrustRatio = 1): number {
-  let low = 300_000;
-  let high = input.weightVariant.mtowKg;
-
-  for (let i = 0; i < 30; i++) {
-    const mid = (low + high) / 2;
-    const testInput = { ...input, towKg: mid };
-
-    const pressureAltitudeFt = calculatePressureAltitude(testInput.elevationFt, testInput.qnhHpa);
-    const isaTempC = 15 - 1.98 * (testInput.elevationFt / 1000);
-    const isaDeviationC = testInput.oatC - isaTempC;
-    const densityAltitudeFt = pressureAltitudeFt + 118.8 * isaDeviationC;
-    const wind = calculateWindComponents(testInput.windDirectionDeg, testInput.windSpeedKt, testInput.runwayHeadingDeg);
-
-    const requiredToraM = estimateRequiredTora(testInput, densityAltitudeFt, wind.headwindKt, thrustRatio);
-    const requiredTodaM = estimateRequiredToda(testInput, requiredToraM);
-    const requiredAsdaM = estimateRequiredAsda(testInput, requiredToraM);
-
-    if (requiredToraM <= testInput.toraM && requiredTodaM <= testInput.todaM && requiredAsdaM <= testInput.asdaM) {
-      low = mid;
-    } else {
-      high = mid;
-    }
-  }
-
-  return Math.round(Math.min(low, input.weightVariant.mtowKg));
+  return getChartFieldLimitWeightKg(input, thrustRatio);
 }
 
 function estimateClimbLimitWeight(
@@ -1164,6 +1372,7 @@ async function main(): Promise<void> {
     const pilotInput: PilotInput = {
       airportIcao,
       runwayIdent,
+      runwaySurface: runway.surface,
       intersectionName,
 
       toraM,
