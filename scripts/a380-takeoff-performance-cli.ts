@@ -134,6 +134,9 @@ interface TakeoffResult {
   vSpeeds: VSpeedResult;
   flexTempC: number | null;
   selectedTakeoffThrustRatio: number;
+  thrustModeUsed: ThrustMode;
+  flexForcedToToga: boolean;
+  flexReason?: string;
   ths: string;
   headwindKt: number;
   crosswindKt: number;
@@ -464,15 +467,40 @@ function calculateTakeoffPerformance(input: PilotInput): TakeoffResult {
 
   const wind = calculateWindComponents(input.windDirectionDeg, input.windSpeedKt, input.runwayHeadingDeg);
 
-  const flexTempC =
+  const togaPossible = isTakeoffPossibleAtThrustRatio(
+    input,
+    pressureAltitudeFt,
+    isaDeviationC,
+    densityAltitudeFt,
+    wind.headwindKt,
+    1,
+  );
+
+  const calculatedFlexTempC =
     input.thrustMode === 'TOGA'
       ? null
       : estimateFlexTemp(input, pressureAltitudeFt, isaDeviationC, densityAltitudeFt, wind.headwindKt);
 
+  const flexForcedToToga = input.thrustMode === 'FLEX' && calculatedFlexTempC === null && togaPossible;
+
+  const thrustModeUsed: ThrustMode =
+    input.thrustMode === 'TOGA' || calculatedFlexTempC === null
+      ? 'TOGA'
+      : 'FLEX';
+
+  const flexTempC = thrustModeUsed === 'FLEX' ? calculatedFlexTempC : null;
+
   const selectedTakeoffThrustRatio =
-    flexTempC === null
+    thrustModeUsed === 'TOGA' || flexTempC === null
       ? 1
       : getTakeoffThrustRatioForAssumedTemp(input, flexTempC);
+
+  const flexReason =
+    input.thrustMode === 'FLEX' && calculatedFlexTempC === null
+      ? togaPossible
+        ? 'FLEX NOT AVAILABLE - TOGA REQUIRED'
+        : 'FLEX NOT AVAILABLE - TOGA ALSO DOES NOT SATISFY PERFORMANCE LIMITS'
+      : undefined;
 
   const estimatedRequiredToraM = estimateRequiredTora(
     input,
@@ -541,7 +569,15 @@ function calculateTakeoffPerformance(input: PilotInput): TakeoffResult {
     warnings.push(`CROSSWIND ABOVE PLACEHOLDER LIMIT ${crosswindLimit} KT`);
   }
 
-  if (input.thrustMode === 'FLEX' && selectedTakeoffThrustRatio >= 0.999) {
+  if (flexForcedToToga) {
+    notes.push('FLEX not available for the selected conditions. TOGA has been selected automatically.');
+  }
+
+  if (input.thrustMode === 'FLEX' && !togaPossible) {
+    warnings.push('TOGA PERFORMANCE NOT SATISFIED - TAKEOFF NOT POSSIBLE');
+  }
+
+  if (input.thrustMode === 'FLEX' && thrustModeUsed === 'FLEX' && selectedTakeoffThrustRatio >= 0.999) {
     notes.push('Selected FLEX produces no meaningful thrust reduction because assumed temperature is at/below flat-rating range.');
   }
 
@@ -575,6 +611,9 @@ function calculateTakeoffPerformance(input: PilotInput): TakeoffResult {
     vSpeeds,
     flexTempC,
     selectedTakeoffThrustRatio: round3(selectedTakeoffThrustRatio),
+    thrustModeUsed,
+    flexForcedToToga,
+    flexReason,
     ths,
     headwindKt: round1(wind.headwindKt),
     crosswindKt: round1(wind.crosswindKt),
@@ -726,7 +765,7 @@ function estimateFlexTemp(
   isaDeviationC: number,
   densityAltitudeFt: number,
   headwindKt: number,
-): number {
+): number | null {
   const flatRatedTempC = getFlatRatedTemperatureC(input.elevationFt);
 
   const minUsefulFlexTempC = Math.ceil(
@@ -739,7 +778,7 @@ function estimateFlexTemp(
   const maxFlexTempC = TRENT_972B_84_ENGINE.maxFlexTempC;
 
   if (minUsefulFlexTempC >= maxFlexTempC) {
-    return maxFlexTempC;
+    return null;
   }
 
   const minThrustRatio = getTakeoffThrustRatioForAssumedTemp(input, minUsefulFlexTempC);
@@ -754,7 +793,7 @@ function estimateFlexTemp(
   );
 
   if (!minFlexWorks) {
-    return minUsefulFlexTempC;
+    return null;
   }
 
   let low = minUsefulFlexTempC;
@@ -1221,8 +1260,14 @@ function printResult(input: PilotInput, result: TakeoffResult): void {
 
   console.log('\nTAKEOFF DATA');
   console.log(`V1 / VR / V2:        ${result.vSpeeds.v1} / ${result.vSpeeds.vr} / ${result.vSpeeds.v2}`);
-  console.log(`FLEX:                ${result.flexTempC === null ? 'TOGA' : `${result.flexTempC} °C`}`);
+  console.log(`REQUESTED THRUST:    ${input.thrustMode}`);
+  console.log(`USED THRUST:         ${result.thrustModeUsed}`);
+  console.log(`FLEX:                ${result.flexTempC === null ? 'N/A' : `${result.flexTempC} °C`}`);
   console.log(`THRUST RATIO:        ${(result.selectedTakeoffThrustRatio * 100).toFixed(1)} %`);
+
+  if (result.flexReason) {
+    console.log(`FLEX MESSAGE:        ${result.flexReason}`);
+  }
   console.log(`THS:                 ${result.ths}`);
 
   console.log('\nCHART SELECTION');
